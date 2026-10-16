@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VanRakshak | Wildlife Intrusion Demo</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { color-scheme: dark; --bg:#0b1411; --panel:#13221c; --line:#294238; --text:#edf7f0; --muted:#a7b9ad; --accent:#b9ef65; --warn:#ffcf70; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:24px clamp(16px,4vw,48px); border-bottom:1px solid var(--line); background:#101d17; }
+    .eyebrow { color:var(--accent); font-size:.78rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { margin:5px 0; font-size:clamp(1.7rem,4vw,2.5rem); }
+    header p { margin:0; color:var(--muted); }
+    main { max-width:1400px; margin:auto; padding:24px clamp(12px,3vw,32px); }
+    .notice { border:1px solid #6d5729; background:#2a2415; color:#ffe3a6; border-radius:12px; padding:12px 14px; margin-bottom:18px; }
+    .layout { display:grid; grid-template-columns:minmax(280px, .85fr) minmax(320px, 1.4fr); gap:18px; align-items:start; }
+    .panel { border:1px solid var(--line); border-radius:16px; background:var(--panel); padding:18px; min-width:0; }
+    h2 { margin:0 0 12px; font-size:1.08rem; }
+    label { display:block; color:var(--muted); margin:12px 0 6px; font-size:.9rem; }
+    input, select, button { width:100%; border-radius:9px; border:1px solid var(--line); padding:11px 12px; background:#0d1913; color:var(--text); font:inherit; }
+    button { margin-top:12px; background:var(--accent); color:#17220e; border:0; font-weight:800; cursor:pointer; }
+    button.secondary { background:#263a30; color:var(--text); border:1px solid var(--line); }
+    button:disabled { opacity:.6; cursor:wait; }
+    .small { color:var(--muted); font-size:.83rem; }
+    #status { margin-top:12px; white-space:pre-wrap; }
+    #map { height:440px; border-radius:12px; overflow:hidden; border:1px solid var(--line); }
+    .results { margin-top:18px; }
+    .alert { border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; display:grid; grid-template-columns:92px 1fr; gap:12px; }
+    .alert img { width:92px; height:80px; object-fit:cover; border-radius:8px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:99px; background:#263a30; color:var(--accent); font-size:.75rem; }
+    .empty { color:var(--muted); padding:12px 0; }
+    footer { color:var(--muted); text-align:center; padding:24px 16px; font-size:.8rem; }
+    @media(max-width:800px) { .layout { grid-template-columns:1fr; } #map { height:340px; } }
+  </style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">WildHack 2026 · Problem B</div>
+  <h1>VanRakshak <span style="color:var(--accent)">/</span> Detect. Locate. Respond.</h1>
+  <p style="margin-top:12px">
+  <a href="/video"
+     style="display:inline-block;padding:10px 16px;background:#b9ef65;
+            color:#17220e;text-decoration:none;border-radius:9px;font-weight:800">
+    🎥 Open Video Detection
+  </a>
+</p>
+  <p>AI-assisted wildlife reserve intrusion monitoring · prototype dashboard</p>
+</header>
+<main>
+  <div class="notice"><strong>Demo mode:</strong> map points and patrol camps are illustrative, not verified operational locations. A model detection is not proof of poaching; a human must verify alerts.</div>
+  <div class="layout">
+    <section class="panel">
+      <h2>Run image detection</h2>
+      <p class="small">Upload a JPG or PNG. The first run may download the YOLO model and can take a few minutes.</p>
+      <form id="detect-form">
+        <label for="camera">Demo camera</label>
+        <select id="camera" name="camera_id">
+          {% for id, cam in cameras.items() %}
+          <option value="{{ id }}">{{ id }} — {{ cam.label }}</option>
+          {% endfor %}
+        </select>
+        <label for="image">Camera image</label>
+        <input id="image" name="image" type="file" accept="image/png,image/jpeg,image/webp" required>
+        <button id="submit-btn" type="submit">Run YOLO detection</button>
+      </form>
+      <button id="test-telegram" class="secondary" type="button">Send Telegram test message</button>
+      <div id="status" class="small" role="status"></div>
+      <div id="latest-result"></div>
+    </section>
+    <section class="panel">
+      <h2>Incident map</h2>
+      <div id="map" aria-label="Map of demo camera locations and alerts"></div>
+      <p class="small">Green pins are demo camera locations; amber pins are sample patrol camps. Alert markers are approximate demo points only.</p>
+    </section>
+  </div>
+  <section class="panel results">
+    <h2>Recent alert log</h2>
+    <div id="alerts"><div class="empty">Loading alerts…</div></div>
+  </section>
+</main>
+<footer>VanRakshak hackathon prototype · Use authorized data only · Not for operational dispatch</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const cameras = {{ cameras|tojson }};
+  const patrolCamps = {{ patrol_camps|tojson }};
+  const map = L.map('map').setView([20.205, 79.36], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  const cameraIcon = L.divIcon({className:'', html:'<div style="background:#b9ef65;border:2px solid #17220e;border-radius:50%;width:15px;height:15px"></div>', iconSize:[15,15], iconAnchor:[7,7]});
+  const campIcon = L.divIcon({className:'', html:'<div style="background:#ffcf70;border:2px solid #3a2a0b;border-radius:4px;width:14px;height:14px"></div>', iconSize:[14,14], iconAnchor:[7,7]});
+  Object.entries(cameras).forEach(([id,c]) => L.marker([c.lat,c.lng], {icon:cameraIcon}).addTo(map).bindPopup(`<b>${id}</b><br>${c.label}<br><i>Demo location</i>`));
+  patrolCamps.forEach(c => L.marker([c.lat,c.lng], {icon:campIcon}).addTo(map).bindPopup(`<b>${c.label}</b><br><i>Sample only</i>`));
+
+  async function refreshAlerts() {
+    const host = document.getElementById('alerts');
+    try {
+      const response = await fetch('/api/alerts');
+      const alerts = await response.json();
+      host.innerHTML = '';
+      if (!alerts.length) { host.innerHTML = '<div class="empty">No alerts yet. Upload an image to start the demo.</div>'; return; }
+      alerts.forEach(a => {
+        const node = document.createElement('div');
+        node.className = 'alert';
+        const img = document.createElement('img'); img.src = a.image_url; img.alt = 'Annotated detection image';
+        const info = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = `${a.camera_id} · ${a.detections}`;
+        const meta = document.createElement('div'); meta.className='small'; meta.textContent = `${new Date(a.created_at).toLocaleString()} · Telegram: ${a.telegram_status}`;
+        const pill = document.createElement('span'); pill.className='pill'; pill.textContent = 'AI detection — verify';
+        info.append(title, document.createElement('br'), meta, document.createElement('br'), pill);
+        node.append(img, info); host.append(node);
+        L.circleMarker([a.lat,a.lng], {radius:9,color:'#ffcf70',fillColor:'#ffcf70',fillOpacity:.85})
+          .addTo(map).bindPopup(`<b>Alert ${a.id}</b><br>${a.camera_id}<br>${a.detections}<br>Demo location`);
+      });
+    } catch (e) { host.innerHTML = '<div class="empty">Could not load alerts. Is the Flask server running?</div>'; }
+  }
+
+  document.getElementById('detect-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = document.getElementById('submit-btn');
+    const status = document.getElementById('status');
+    const resultHost = document.getElementById('latest-result');
+    const file = document.getElementById('image').files[0];
+    if (!file) return;
+    const data = new FormData(event.target);
+    button.disabled = true; button.textContent = 'Detecting…';
+    status.textContent = 'Running model. The first run may take longer while model weights download.';
+    resultHost.innerHTML = '';
+    try {
+      const response = await fetch('/api/detect', {method:'POST', body:data});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Detection failed');
+      const detections = result.detections.length
+        ? result.detections.map(d => `${d.class} (${Math.round(d.confidence*100)}%)`).join(', ')
+        : 'No target classes detected above the confidence threshold.';
+      status.textContent = `Finished. ${detections}\nTelegram status: ${result.telegram_status}\n${result.note}`;
+      if (result.annotated_image) {
+        const img = document.createElement('img'); img.src=result.annotated_image; img.alt='Annotated detection result';
+        img.style='width:100%;margin-top:12px;border-radius:10px;border:1px solid var(--line)';
+        resultHost.append(img);
+      }
+      await refreshAlerts();
+    } catch (error) {
+      status.textContent = `Error: ${error.message}`;
+    } finally {
+      button.disabled = false; button.textContent = 'Run YOLO detection';
+    }
+  });
+
+  document.getElementById('test-telegram').addEventListener('click', async () => {
+    const status = document.getElementById('status');
+    status.textContent = 'Sending Telegram test…';
+    try {
+      const response = await fetch('/api/test-alert', {method:'POST'});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Telegram test failed');
+      status.textContent = 'Telegram test message sent. Check your chat.';
+    } catch (error) { status.textContent = `Telegram test: ${error.message}`; }
+  });
+
+  refreshAlerts();
+</script>
+</body>
+</html>

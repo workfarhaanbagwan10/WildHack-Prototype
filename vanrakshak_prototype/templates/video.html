@@ -1,0 +1,104 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VanRakshak | Video Detection</title>
+  <style>
+    body { margin:0; padding:24px; background:#0b1411; color:#edf7f0;
+           font:15px/1.5 system-ui,sans-serif; }
+    main { max-width:850px; margin:auto; }
+    section { background:#13221c; border:1px solid #294238;
+              border-radius:14px; padding:20px; margin-top:20px; }
+    input,button { width:100%; box-sizing:border-box; padding:12px;
+                   margin-top:12px; border-radius:8px; font:inherit; }
+    input { background:#0d1913; color:white; border:1px solid #294238; }
+    button { background:#b9ef65; color:#17220e; border:0;
+             font-weight:800; cursor:pointer; }
+    button:disabled { opacity:.6; }
+    a { color:#b9ef65; }
+    .muted { color:#a7b9ad; }
+    #status { white-space:pre-wrap; margin-top:16px; }
+    video { width:100%; margin-top:16px; border-radius:10px; }
+  </style>
+</head>
+<body>
+<main>
+  <a href="/">← Back to dashboard</a>
+  <h1>🎥 Video Detection</h1>
+  <p class="muted">
+    Upload a short video to detect people and vehicles using YOLO.
+    Processing time depends on video length and your computer.
+  </p>
+
+  <section>
+    <form id="video-form">
+      <label for="video">Choose a video (MP4, AVI, MOV)</label>
+      <input id="video" name="video" type="file"
+             accept="video/mp4,video/avi,video/quicktime,video/x-msvideo"
+             required>
+      <button id="submit-btn" type="submit">Process Video</button>
+    </form>
+    <div id="status" role="status"></div>
+    <div id="result"></div>
+  </section>
+</main>
+
+<script>
+const form = document.getElementById('video-form');
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+
+  const button = document.getElementById('submit-btn');
+  const status = document.getElementById('status');
+  const resultHost = document.getElementById('result');
+  const file = document.getElementById('video').files[0];
+
+  if (!file) return;
+
+  button.disabled = true;
+  button.textContent = 'Processing video…';
+  status.textContent = 'Uploading and analyzing video frames. Please wait.';
+  resultHost.replaceChildren();
+
+  try {
+    const response = await fetch('/upload_video', {
+      method: 'POST',
+      body: new FormData(form)
+    });
+
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Video processing failed');
+
+    status.textContent =
+      `Processing complete.\nFrames processed: ${result.frames_processed}\n` +
+      `Frames with detections: ${result.frames_with_detections}\n` +
+      `Detected classes: ${result.detections.join(', ') || 'None'}\n` +
+      `Telegram: ${result.telegram_status}`;
+
+    if (result.video_url) {
+      const video = document.createElement('video');
+      video.controls = true;
+      video.preload = 'metadata';
+      video.src = result.video_url;
+      resultHost.append(video);
+
+      const link = document.createElement('a');
+      link.href = result.video_url;
+      link.download = '';
+      link.textContent = 'Download annotated video';
+      link.style.display = 'block';
+      link.style.marginTop = '12px';
+      resultHost.append(link);
+    }
+  } catch (error) {
+    status.textContent = `Error: ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Process Video';
+  }
+});
+</script>
+</body>
+</html>
